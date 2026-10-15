@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gtags Code View — Callers & References (Standalone)</title>
+  <link rel="stylesheet" href="media/treeview.css" />
+  <script src="media/d3.js"></script>
+  <script src="media/d3-flextree.js"></script>
+  <script src="media/treeview.js"></script>
+  <script src="media/dummyData.js"></script>
+  <style>
+    :root {
+      --bg: #141417;
+      --bg-darker: #0d0d0f;
+      --panel: #1b1b1f;
+      --panel-hover: #26262c;
+      --border: #2c2c34;
+      --border-light: #383842;
+      --text: #e2e8f0;
+      --text-muted: #8e8ea0;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --accent-glow: rgba(59, 130, 246, 0.25);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --callers-tag: #8b5cf6;
+      --refs-tag: #06b6d4;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: 13px;
+    }
+
+    .app-shell {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top app navigation header */
+    .app-header {
+      height: 44px;
+      background: var(--bg-darker);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      user-select: none;
+      z-index: 20;
+    }
+
+    .logo-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 13px;
+      color: #f8fafc;
+      letter-spacing: 0.3px;
+    }
+
+    .logo-icon {
+      width: 22px;
+      height: 22px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 12px;
+      color: #fff;
+      box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+    }
+
+    .header-badge {
+      font-size: 10px;
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      padding: 2px 7px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 5px 11px;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      font-weight: 500;
+      user-select: none;
+    }
+
+    .btn:hover {
+      background: var(--panel-hover);
+      border-color: var(--border-light);
+      color: #ffffff;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-hover);
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .btn-sm {
+      padding: 3px 8px;
+      font-size: 11px;
+    }
+
+    /* Main layout: sidebar + workspace */
+    .main-body {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+      position: relative;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 240px;
+      min-width: 160px;
+      max-width: 400px;
+      height: 100%;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .sidebar-resizer {
+      position: absolute;
+      top: 0;
+      right: -3px;
+      width: 6px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 15;
+    }
+
+    .sidebar-resizer:hover,
+    .sidebar-resizer.dragging {
+      background: var(--accent);
+      opacity: 0.7;
+    }
+
+    /* Super Tabs */
+    .super-tabs {
+      display: flex;
+      width: 100%;
+      background: var(--bg-darker);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .super-tab {
+      flex: 1;
+      text-align: center;
+      padding: 10px 0;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+      transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .super-tab:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .super-tab.active {
+      color: #ffffff;
+      background: var(--panel);
+    }
+
+    .super-tab.active::after {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--accent);
+      box-shadow: 0 -1px 8px var(--accent);
+    }
+
+    .super-tab-count {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 9px;
+      padding: 1px 6px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .super-tab.active .super-tab-count {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .sidebar-subbar {
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.1);
+    }
+
+    .sidebar-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+
+    /* Tabs list */
+    .tabs {
+      flex: 1;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .tab {
+      position: relative;
+      width: 100%;
+      min-height: 38px;
+      padding: 0 32px 0 12px;
+      display: flex;
+      align-items: center;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      transition: background 0.12s, color 0.12s;
+      gap: 8px;
+    }
+
+    .tab:hover {
+      background: var(--panel-hover);
+      color: var(--text);
+    }
+
+    .tab.active {
+      color: #ffffff;
+      background: rgba(59, 130, 246, 0.12);
+      font-weight: 500;
+    }
+
+    .tab.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .tab-icon {
+      font-family: monospace;
+      font-size: 11px;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .tab.active .tab-icon {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .tab-label {
+      font-size: 12px;
+      font-family: var(--vscode-editor-font-family, Menlo, Monaco, "Courier New", monospace);
+      letter-spacing: 0.1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+
+    .close-tab {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 18px;
+      height: 18px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.1s;
+    }
+
+    .tab:hover .close-tab {
+      display: flex;
+    }
+
+    .close-tab:hover {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+    }
+
+    /* Workspace */
+    .workspace {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      position: relative;
+    }
+
+    .workspace-toolbar {
+      height: 38px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      user-select: none;
+    }
+
+    .current-symbol-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .symbol-name-badge {
+      font-family: Menlo, Monaco, "Courier New", monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .symbol-mode-tag {
+      font-size: 10px;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .tag-callers {
+      background: rgba(139, 92, 246, 0.2);
+      color: #a78bfa;
+      border: 1px solid rgba(139, 92, 246, 0.3);
+    }
+
+    .tag-references {
+      background: rgba(6, 182, 212, 0.2);
+      color: #22d3ee;
+      border: 1px solid rgba(6, 182, 212, 0.3);
+    }
+
+    .tree-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .toolbar-buttons {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .tab-container {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      font-size: 13px;
+      gap: 12px;
+    }
+
+    .empty-state-icon {
+      font-size: 32px;
+      opacity: 0.4;
+    }
+
+    /* References styling */
+    .references-container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 16px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .references-list {
+      max-width: 1000px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .reference-item {
+      font-family: Menlo, Monaco, "Courier New", monospace;
+      font-size: 12px;
+      padding: 10px 14px;
+      cursor: pointer;
+      border-radius: 6px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      transition: all 0.15s ease;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    }
+
+    .reference-item:hover {
+      background: var(--panel-hover);
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .reference-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .reference-file {
+      color: #60a5fa;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .reference-line-badge {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+
+    .reference-code {
+      padding: 8px 12px;
+      background: var(--bg-darker);
+      border-radius: 4px;
+      white-space: pre;
+      overflow-x: auto;
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      line-height: 1.5;
+    }
+
+    /* Floating Toast Notification */
+    .toast-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 100;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast {
+      pointer-events: auto;
+      background: #1e1e24;
+      border: 1px solid #3b82f6;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 12px rgba(59, 130, 246, 0.3);
+      padding: 10px 16px;
+      border-radius: 6px;
+      color: #f8fafc;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      animation: slideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 420px;
+    }
+
+    .toast-icon {
+      color: #3b82f6;
+      font-size: 16px;
+    }
+
+    .toast-content {
+      flex: 1;
+    }
+
+    .toast-title {
+      font-weight: 600;
+      color: #60a5fa;
+    }
+
+    .toast-subtitle {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.96);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    /* Simple Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(2px);
+      z-index: 50;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      width: 380px;
+      max-width: 90vw;
+      padding: 20px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+    }
+
+    .modal-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .modal-input {
+      width: 100%;
+      background: var(--bg-darker);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: #fff;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: monospace;
+      outline: none;
+      margin-bottom: 14px;
+    }
+
+    .modal-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 8px var(--accent-glow);
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app-shell">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="logo-badge">
+        <div class="logo-icon">G</div>
+        <span>Gtags Code View</span>
+        <span class="header-badge">Standalone Explorer</span>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-sm" id="btnFit" title="Fit active callers tree to view">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          </svg>
+          Fit View
+        </button>
+        <button class="btn btn-sm" id="btnResetTabs" title="Reset default 3 Callers and 3 References tabs">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+            <path d="M3 21v-5h5" />
+          </svg>
+          Reset Demo Tabs
+        </button>
+        <button class="btn btn-sm btn-primary" id="btnNewSymbol">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          New Symbol
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="main-body">
+      <!-- Left sidebar -->
+      <aside id="sidebar" class="sidebar">
+        <div id="sidebarResizer" class="sidebar-resizer" title="Drag to resize"></div>
+        <div class="super-tabs">
+          <div class="super-tab active" data-mode="callers">
+            Callers
+            <span class="super-tab-count" id="countCallers">3</span>
+          </div>
+          <div class="super-tab" data-mode="references">
+            References
+            <span class="super-tab-count" id="countReferences">3</span>
+          </div>
+        </div>
+        <div class="sidebar-subbar">
+          <span class="sidebar-title" id="sidebarSectionTitle">Open Callers Tabs</span>
+        </div>
+        <div id="tabs" class="tabs"></div>
+      </aside>
+
+      <!-- Main workspace -->
+      <main class="workspace">
+        <!-- Toolbar above tree / references -->
+        <div class="workspace-toolbar">
+          <div class="current-symbol-info" id="toolbarSymbolInfo">
+            <span class="symbol-name-badge" id="lblActiveSymbol">handle_connection</span>
+            <span class="symbol-mode-tag tag-callers" id="lblActiveMode">Callers</span>
+            <span class="tree-hint" id="lblTreeHint">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="16" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12.01" y2="8" />
+              </svg>
+              Click node circles to expand up to 4 levels of callers. Click node name to inspect file location.
+            </span>
+          </div>
+        </div>
+
+        <div id="plotContainer" class="tab-container"></div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- New Symbol Modal -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-title">Open Symbol in Standalone View</div>
+      <input type="text" id="txtNewSymbol" class="modal-input" placeholder="e.g. handle_connection or process_packet" />
+      <div class="modal-footer">
+        <button class="btn btn-sm" id="btnCancelModal">Cancel</button>
+        <button class="btn btn-sm btn-primary" id="btnSubmitModal">Open Tab</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * Standalone Adapter & UI Logic
+     * Bridges Dummy Data with Gtags Markmap Treeview
+     */
+
+    // Fallback or VS Code API
+    const isInsideVsCode = typeof acquireVsCodeApi === 'function';
+    const vscode = isInsideVsCode ? acquireVsCodeApi() : {
+      postMessage: function (msg) {
+        if (msg.type === 'postFileInfo') {
+          showToast('Revealed in editor', (msg.data.file || 'unknown') + ':' + (msg.data.line || 0));
+        }
+      }
+    };
+
+    const items = [];
+    let activeId = null;
+    const lastActiveId = { callers: null, references: null };
+
+    const sidebarEl = document.getElementById("sidebar");
+    const sidebarResizerEl = document.getElementById("sidebarResizer");
+    const tabsEl = document.getElementById("tabs");
+    const plotContainerEl = document.getElementById("plotContainer");
+    const countCallersEl = document.getElementById("countCallers");
+    const countReferencesEl = document.getElementById("countReferences");
+    const sidebarSectionTitleEl = document.getElementById("sidebarSectionTitle");
+    const lblActiveSymbolEl = document.getElementById("lblActiveSymbol");
+    const lblActiveModeEl = document.getElementById("lblActiveMode");
+    const lblTreeHintEl = document.getElementById("lblTreeHint");
+    const toastContainerEl = document.getElementById("toastContainer");
+
+    const modalOverlayEl = document.getElementById("modalOverlay");
+    const txtNewSymbolEl = document.getElementById("txtNewSymbol");
+    const btnNewSymbolEl = document.getElementById("btnNewSymbol");
+    const btnCancelModalEl = document.getElementById("btnCancelModal");
+    const btnSubmitModalEl = document.getElementById("btnSubmitModal");
+    const btnResetTabsEl = document.getElementById("btnResetTabs");
+    const btnFitEl = document.getElementById("btnFit");
+
+    let currentSuperTab = 'callers';
+
+    // Standalone tag getter using dummyData.js
+    function getTags(tagName, mode = 'callers') {
+      if (window.GTAGS_DUMMY_DATA && typeof window.GTAGS_DUMMY_DATA.getTags === 'function') {
+        return window.GTAGS_DUMMY_DATA.getTags(tagName, mode);
+      }
+      return Promise.resolve([]);
+    }
+    window.getTags = getTags;
+
+    // Standalone file data post handler
+    window.postFileData = function (tagData) {
+      vscode.postMessage({
+        type: 'postFileInfo',
+        data: tagData
+      });
+      showToast('Navigated to symbol', `${tagData.file || ''}:${tagData.line || ''}\n${tagData.data || ''}`);
+    };
+
+    function showToast(title, subtitle) {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.innerHTML = `
+        <div class="toast-icon">📍</div>
+        <div class="toast-content">
+          <div class="toast-title">${title}</div>
+          <div class="toast-subtitle">${subtitle.replace(/</g, '&lt;')}</div>
+        </div>
+      `;
+      toastContainerEl.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    function switchSuperTab(mode) {
+      document.querySelectorAll('.super-tab').forEach(t => t.classList.remove('active'));
+      const target = document.querySelector(`.super-tab[data-mode="${mode}"]`);
+      if (target) target.classList.add('active');
+      currentSuperTab = mode;
+      sidebarSectionTitleEl.textContent = mode === 'callers' ? 'Open Callers Tabs' : 'Open References Tabs';
+      lblTreeHintEl.style.display = mode === 'callers' ? 'flex' : 'none';
+    }
+
+    document.querySelectorAll('.super-tab').forEach(el => {
+      el.addEventListener('click', () => {
+        if (currentSuperTab === el.dataset.mode) return;
+        switchSuperTab(el.dataset.mode);
+
+        activeId = lastActiveId[currentSuperTab];
+        const visibleItems = items.filter(i => i.mode === currentSuperTab);
+        if (!activeId || !visibleItems.find(i => i.id === activeId)) {
+          activeId = visibleItems.length > 0 ? visibleItems[0].id : null;
+        }
+        if (activeId) lastActiveId[currentSuperTab] = activeId;
+        renderTabs();
+        renderContent();
+      });
+    });
+
+    function updateBadgeCounts() {
+      const callersCount = items.filter(i => i.mode === 'callers').length;
+      const refsCount = items.filter(i => i.mode === 'references').length;
+      countCallersEl.textContent = callersCount;
+      countReferencesEl.textContent = refsCount;
+    }
+
+    function createTab(symbolName, mode = 'callers', autoSelect = true) {
+      const item = {
+        id: (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)),
+        name: symbolName,
+        mode: mode
+      };
+
+      const container = document.createElement('div');
+      container.style.width = '100%';
+      container.style.height = '100%';
+      container.style.display = 'none';
+      container.id = `container-${item.id}`;
+
+      if (mode === 'callers') {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.id = `mindmap-${item.id}`;
+        svg.style.width = '100%';
+        svg.style.height = '100%';
+        container.appendChild(svg);
+      } else {
+        container.className = 'references-container';
+        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏳</div>Loading references...</div>';
+      }
+
+      item.container = container;
+      plotContainerEl.appendChild(container);
+      items.push(item);
+      updateBadgeCounts();
+
+      if (autoSelect) {
+        if (currentSuperTab !== mode) {
+          switchSuperTab(mode);
+        }
+        selectItem(item.id);
+      }
+
+      if (mode === 'callers') {
+        item.mm = window.markmap.Markmap.create(
+          `svg#mindmap-${item.id}`,
+          getTags,
+          window.postFileData,
+          item.name
+        );
+
+        // Auto-expand direct callers (Level 1 -> Level 2) so tree is immediately rich
+        if (item.mm && item.mm.state && item.mm.state.data) {
+          item.mm.toggleNode(item.mm.state.data).then(() => {
+            setTimeout(() => {
+              if (item.id === activeId && typeof item.mm.fit === 'function') {
+                item.mm.fit();
+              }
+            }, 80);
+          });
+        }
+      } else {
+        getTags(item.name, mode).then(data => {
+          container.innerHTML = '';
+          if (!data || data.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📂</div>No references found</div>';
+            return;
+          }
+          const listEl = document.createElement('div');
+          listEl.className = 'references-list';
+
+          data.forEach(ref => {
+            const refEl = document.createElement('div');
+            refEl.className = 'reference-item';
+            refEl.innerHTML = `
+              <div class="reference-header">
+                <span class="reference-file">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                  </svg>
+                  ${ref.displayFile || ref.file}
+                </span>
+                <span class="reference-line-badge">Line ${ref.line}</span>
+              </div>
+              <div class="reference-code">${ref.code.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+            `;
+            refEl.addEventListener('click', () => {
+              window.postFileData({ data: ref.code, line: ref.line, file: ref.file });
+            });
+            listEl.appendChild(refEl);
+          });
+          container.appendChild(listEl);
+        });
+      }
+
+      return item;
+    }
+
+    function selectItem(id) {
+      activeId = id;
+      const item = items.find(i => i.id === id);
+      if (item) {
+        lastActiveId[item.mode] = id;
+        lblActiveSymbolEl.textContent = item.name;
+        lblActiveModeEl.textContent = item.mode === 'callers' ? 'Callers' : 'References';
+        lblActiveModeEl.className = `symbol-mode-tag tag-${item.mode}`;
+      }
+      renderTabs();
+      renderContent();
+    }
+
+    function closeItem(id) {
+      const index = items.findIndex(p => p.id === id);
+      if (index === -1) return;
+
+      const item = items[index];
+      if (item.mm && typeof item.mm.destroy === 'function') {
+        item.mm.destroy();
+      }
+      if (item.container && item.container.parentNode) {
+        item.container.parentNode.removeChild(item.container);
+      }
+
+      items.splice(index, 1);
+      updateBadgeCounts();
+
+      const visibleItems = items.filter(i => i.mode === currentSuperTab);
+      if (visibleItems.length === 0) {
+        activeId = null;
+        lastActiveId[currentSuperTab] = null;
+      } else if (activeId === id) {
+        activeId = visibleItems[visibleItems.length - 1].id;
+        lastActiveId[currentSuperTab] = activeId;
+      }
+
+      renderTabs();
+      renderContent();
+    }
+
+    function renderTabs() {
+      tabsEl.innerHTML = "";
+      const visibleItems = items.filter(i => i.mode === currentSuperTab);
+
+      for (const item of visibleItems) {
+        const tab = document.createElement("div");
+        tab.className = "tab" + (item.id === activeId ? " active" : "");
+        tab.title = item.name;
+
+        const icon = document.createElement("span");
+        icon.className = "tab-icon";
+        icon.textContent = item.mode === 'callers' ? "ƒ" : "⌕";
+
+        const label = document.createElement("span");
+        label.className = "tab-label";
+        label.textContent = item.name;
+
+        const close = document.createElement("button");
+        close.className = "close-tab";
+        close.type = "button";
+        close.title = "Close tab";
+        close.innerHTML = `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1 1L9 9M9 1L1 9"/></svg>`;
+
+        close.addEventListener("click", event => {
+          event.stopPropagation();
+          closeItem(item.id);
+        });
+
+        tab.appendChild(icon);
+        tab.appendChild(label);
+        tab.appendChild(close);
+        tab.addEventListener("click", () => selectItem(item.id));
+        tabsEl.appendChild(tab);
+      }
+    }
+
+    function renderContent() {
+      const activeItem = items.find(p => p.id === activeId);
+
+      for (const item of items) {
+        if (item.container) {
+          item.container.style.display = item.id === activeId ? "block" : "none";
+        }
+      }
+
+      let emptyStateEl = plotContainerEl.querySelector(':scope > .empty-state');
+      if (!emptyStateEl) {
+        emptyStateEl = document.createElement('div');
+        emptyStateEl.className = 'empty-state';
+        plotContainerEl.appendChild(emptyStateEl);
+      }
+
+      if (!activeItem) {
+        emptyStateEl.innerHTML = `
+          <div class="empty-state-icon">📋</div>
+          <div>No open tabs in ${currentSuperTab}. Click <strong>"+ New Symbol"</strong> or <strong>"Reset Demo Tabs"</strong> to open.</div>
+        `;
+        emptyStateEl.style.display = 'flex';
+        lblActiveSymbolEl.textContent = 'None';
+        lblActiveModeEl.textContent = currentSuperTab;
+        return;
+      }
+
+      emptyStateEl.style.display = 'none';
+
+      if (activeItem.mode === 'callers' && activeItem.mm) {
+        setTimeout(() => {
+          if (typeof activeItem.mm.fit === 'function') {
+            activeItem.mm.fit();
+          }
+        }, 50);
+      }
+    }
+
+    // Fit view button
+    btnFitEl.addEventListener('click', () => {
+      const activeItem = items.find(p => p.id === activeId);
+      if (activeItem && activeItem.mode === 'callers' && activeItem.mm && typeof activeItem.mm.fit === 'function') {
+        activeItem.mm.fit();
+      }
+    });
+
+    // Reset default 3 + 3 tabs
+    function loadInitialTabs() {
+      // Clear existing
+      while (items.length > 0) {
+        closeItem(items[0].id);
+      }
+      plotContainerEl.innerHTML = '';
+
+      const defCallers = [
+        'handle_connection',
+        'process_packet',
+        'parse_config'
+      ];
+      const defRefs = [
+        'handle_connection',
+        'process_packet',
+        'parse_config'
+      ];
+
+      // Create 3 for Callers
+      let firstCallerId = null;
+      defCallers.forEach((sym, idx) => {
+        const item = createTab(sym, 'callers', false);
+        if (idx === 0) firstCallerId = item.id;
+      });
+
+      // Create 3 for References
+      let firstRefId = null;
+      defRefs.forEach((sym, idx) => {
+        const item = createTab(sym, 'references', false);
+        if (idx === 0) firstRefId = item.id;
+      });
+
+      lastActiveId.callers = firstCallerId;
+      lastActiveId.references = firstRefId;
+
+      switchSuperTab('callers');
+      selectItem(firstCallerId);
+    }
+
+    btnResetTabsEl.addEventListener('click', () => {
+      loadInitialTabs();
+      showToast('Demo tabs reset', 'Loaded 3 Callers tabs & 3 References tabs');
+    });
+
+    // Modal logic for new symbol
+    btnNewSymbolEl.addEventListener('click', () => {
+      modalOverlayEl.style.display = 'flex';
+      txtNewSymbolEl.value = '';
+      txtNewSymbolEl.focus();
+    });
+
+    btnCancelModalEl.addEventListener('click', () => {
+      modalOverlayEl.style.display = 'none';
+    });
+
+    modalOverlayEl.addEventListener('click', (e) => {
+      if (e.target === modalOverlayEl) modalOverlayEl.style.display = 'none';
+    });
+
+    function submitNewSymbol() {
+      const sym = txtNewSymbolEl.value.trim();
+      if (!sym) return;
+      modalOverlayEl.style.display = 'none';
+      createTab(sym, currentSuperTab, true);
+    }
+
+    btnSubmitModalEl.addEventListener('click', submitNewSymbol);
+    txtNewSymbolEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitNewSymbol();
+      if (e.key === 'Escape') modalOverlayEl.style.display = 'none';
+    });
+
+    // Sidebar resizer
+    let resizing = false;
+    sidebarResizerEl.addEventListener("pointerdown", event => {
+      resizing = true;
+      sidebarResizerEl.classList.add("dragging");
+      sidebarResizerEl.setPointerCapture(event.pointerId);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    });
+
+    sidebarResizerEl.addEventListener("pointermove", event => {
+      if (!resizing) return;
+      const newWidth = Math.max(160, Math.min(420, event.clientX));
+      sidebarEl.style.width = `${newWidth}px`;
+    });
+
+    const stopResizing = () => {
+      if (!resizing) return;
+      resizing = false;
+      sidebarResizerEl.classList.remove("dragging");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    sidebarResizerEl.addEventListener("pointerup", stopResizing);
+    sidebarResizerEl.addEventListener("pointercancel", stopResizing);
+
+    // Initialize with 3 callers and 3 references tabs
+    loadInitialTabs();
+  </script>
+</body>
+
+</html>
